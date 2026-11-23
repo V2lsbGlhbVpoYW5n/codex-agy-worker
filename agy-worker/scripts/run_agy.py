@@ -14,7 +14,7 @@ DEFAULT_MODEL = "gemini-4-neon"
 DEFAULT_EFFORT = "medium"
 DEFAULT_PRINT_TIMEOUT = "10m"
 SUBPROCESS_GRACE_SECONDS = 30.0
-MAX_INLINE_PROMPT_BYTES = 32768
+MAX_INLINE_PROMPT_BYTES = 120000
 
 RUN_MODES = ("read-only", "plan", "accept-edits", "auto")
 ALL_MODES = (*RUN_MODES, "delete")
@@ -192,13 +192,17 @@ def build_instruction(mode):
 
 def build_command(args, instruction, task):
     combined = f"{instruction}\n\n{task}"
-    use_stdin = len(combined.encode("utf-8")) > MAX_INLINE_PROMPT_BYTES
-    prompt_arg = instruction if use_stdin else combined
+    combined_bytes = combined.encode("utf-8")
+    if len(combined_bytes) > MAX_INLINE_PROMPT_BYTES:
+        raise ValueError(
+            f"combined prompt is {len(combined_bytes)} bytes (limit {MAX_INLINE_PROMPT_BYTES} bytes); "
+            "trim context or pass file paths for agy to read directly"
+        )
 
     command = [
         "agy",
         "-p",
-        prompt_arg,
+        combined,
         "--model",
         args.model,
         "--output-format",
@@ -219,8 +223,7 @@ def build_command(args, instruction, task):
     if args.json_schema:
         command.extend(["--json-schema", args.json_schema])
 
-    stdin_bytes = task.encode("utf-8") if use_stdin else None
-    return command, stdin_bytes
+    return command, None
 
 
 def parse_args(argv=None):
@@ -239,6 +242,15 @@ def parse_args(argv=None):
         help=f"Reasoning effort level (default: {DEFAULT_EFFORT}, omitted if --model includes an effort suffix)",
     )
     parser.add_argument("--prompt", help="Task text (default: read stdin)")
+    parser.add_argument(
+        "--context-file",
+        help="Optional Markdown/text context file (e.g. from export_codex_context.py) prepended to the task",
+    )
+    parser.add_argument(
+        "--delete-context-file",
+        action="store_true",
+        help="Remove --context-file after the run finishes",
+    )
     parser.add_argument(
         "--print-timeout",
         default=DEFAULT_PRINT_TIMEOUT,
@@ -304,6 +316,16 @@ def main(argv=None):
     if not task.strip():
         parser.error("a non-empty task is required")
 
+    context_path = Path(args.context_file).expanduser() if args.context_file else None
+    if context_path is not None:
+        try:
+            context_text = context_path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError as exc:
+            print(f"agy-worker: failed to read --context-file {context_path}: {exc}", file=sys.stderr)
+            return 1
+        if context_text:
+            task = f"{context_text}\n\n---\n\n## Current Task\n\n{task}"
+
     instruction = build_instruction(args.mode)
     command, stdin_bytes = build_command(args, instruction, task)
     subprocess_timeout = (
@@ -313,30 +335,38 @@ def main(argv=None):
     )
 
     try:
-        if stdin_bytes is not None:
-            run = subprocess.run(
-                command,
-                input=stdin_bytes,
-                stdout=subprocess.PIPE,
-                timeout=subprocess_timeout,
+        try:
+            if stdin_bytes is not None:
+                run = subprocess.run(
+                    command,
+                    input=stdin_bytes,
+                    stdout=subprocess.PIPE,
+                    timeout=subprocess_timeout,
+                )
+            else:
+                run = subprocess.run(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    timeout=subprocess_timeout,
+                )
+            result = validate(run.stdout, run.returncode, require_structured=bool(args.json_schema))
+        except subprocess.TimeoutExpired:
+            print(
+                f"agy-worker: timed out after {args.print_timeout} (+{int(SUBPROCESS_GRACE_SECONDS)}s grace)",
+                file=sys.stderr,
             )
-        else:
-            run = subprocess.run(
-                command,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                timeout=subprocess_timeout,
-            )
-        result = validate(run.stdout, run.returncode, require_structured=bool(args.json_schema))
-    except subprocess.TimeoutExpired:
-        print(
-            f"agy-worker: timed out after {args.print_timeout} (+{int(SUBPROCESS_GRACE_SECONDS)}s grace)",
-            file=sys.stderr,
-        )
-        return 1
-    except (OSError, ValueError) as exc:
-        print(f"agy-worker: {exc}", file=sys.stderr)
-        return 1
+            return 1
+        except (OSError, ValueError) as exc:
+            print(f"agy-worker: {exc}", file=sys.stderr)
+            return 1
+    finally:
+        if args.delete_context_file and context_path is not None:
+            try:
+                if context_path.exists() or context_path.is_symlink():
+                    context_path.unlink()
+            except OSError as exc:
+                print(f"agy-worker: context cleanup warning: {exc}", file=sys.stderr)
 
     if args.delete_after:
         cid = result.get("conversation_id") if isinstance(result, dict) else None

@@ -42,7 +42,9 @@ conversation_retention: auto
 
 ## 子代理执行与面板可见性
 
-- **推荐在策略允许时优先以 Codex 原生子代理（subagent）运行本技能任务**，并在开启子代理时**明确要求让这项任务显示在 Codex 的子代理面板里**（通过 Codex 原生子代理工具派生子代理线程来执行 `scripts/run_agy.py`，隔离噪声上下文并便于在子代理面板查看实时进度与结果）。[Codex 子代理文档](https://learn.chatgpt.com/docs/agent-configuration/subagents)
+- **推荐在策略允许时优先以 Codex 原生子代理（subagent）运行本技能任务**，并在开启子代理时**明确要求让这项任务显示在 Codex 的子代理面板里**。[Codex 子代理文档](https://learn.chatgpt.com/docs/agent-configuration/subagents)
+- **保持子代理外壳极简（不要做多余工作）**：派生子代理时通常**避免全量 fork 父历史**（例如 `fork_turns: "none"`），只传递精炼的任务 brief；子代理只负责“（如主代理要求）先导出上下文 → 执行 `scripts/run_agy.py` → 按策略清理临时会话/文件 → 简明回传结果”，不要在子代理内自行翻代码、重复调研或做多余加工。
+- **按需同源导出上下文**：由**主代理**像调用原生子代理一样判断当前任务是否需要较长对话背景——需要时，要求子代理启动 `agy` 前先运行 `scripts/export_codex_context.py`（复用 Codex 同源 compaction 摘要并剥离工具输出噪声，输出到 `/tmp/*.md`，零额外 Codex output tokens），再通过 `run_agy.py --context-file <path> --delete-context-file` 传入并自动清理。
 - 若当前策略或环境不允许启动子代理，再由主代理直接运行脚本。
 - **身份边界**：无论由主代理还是 Codex 子代理执行，均须将结果标明为来自外部 `AGY CLI`，并在需要追踪、续接或清理时引用 AGY 实际返回的 `conversation_id`。禁止伪造 Codex 原生 `agent_role` 或 `agent_path`，也不要把 AGY 的 `conversation_id` 传给 Codex 原生子代理工具。
 
@@ -67,12 +69,19 @@ python3 "<skill-dir>/scripts/run_agy.py" read-only --sandbox --delete-after <<'T
 只读检查 src/cache.py。指出缓存键在哪里生成，并给出相关函数名。
 TASK
 
+# 需要携带历史上下文时：先同源导出（去工具噪声），再传入并自动清理临时文件
+ctx=$(python3 "<skill-dir>/scripts/export_codex_context.py")
+python3 "<skill-dir>/scripts/run_agy.py" read-only --sandbox --context-file "$ctx" --delete-context-file --delete-after <<'TASK'
+结合上述会话背景，审查 src/cache.py 的边界问题。
+TASK
+
 # 子代理结束时显式删除临时 AGY 对话（按 UUID 清理本机 agy-cli 存储）
 python3 "<skill-dir>/scripts/run_agy.py" delete "<conversation_id>"
 ```
 
 **常用可选参数**：
 - `--prompt <text>`：命令行直接传任务（也可走 stdin；超长任务时脚本会自动把指令放 `-p`、任务正文走 stdin 管道，避免触发 `ARG_MAX`）。
+- `--context-file <path>` / `--delete-context-file`：把 `export_codex_context.py` 导出的临时 Markdown 上下文拼入任务并在结束后自动删除该临时文件。
 - `--conversation <id>`：按会话保留策略续接已有 AGY 会话（或配合 `delete` 指定要删除的会话 ID）。
 - `--delete-after`：单轮临时任务执行成功后自动清理本次新建的 AGY 对话。
 - `--print-timeout <duration>`：默认 `10m`（传 `0s` 关闭限时），脚本同时带进程兜底超时以防 headless 挂起。
@@ -85,7 +94,7 @@ python3 "<skill-dir>/scripts/run_agy.py" delete "<conversation_id>"
 ## 沙箱与权限
 
 - **外发授权与遇拒处理**：本会话**首次**将当前项目的代码、架构或内部上下文发给外部 AGY 服务前，若用户尚未明确授权发送这些内容，先向用户简短确认一次是否允许将相关代码/上下文发送给本机 `agy`（Google Antigravity）服务及大致范围，获准后再调用。若仍被 Codex `auto-reviewer` 拒绝，不要反复重试同一命令，直接向用户说明被拒原因与拟发送范围，等待明确授权或在 Codex `.rules` 中配置放行。
-- **Codex 侧沙箱**：执行 `run_agy.py` 需要外网访问模型 API 并读取本机 AGY 认证凭据（如 `~/.gemini/antigravity-cli/`）；执行 `delete` / `--delete-after` 还需写权限以清理 `~/.gemini/antigravity-cli/` 中该会话的本地文件与索引。若因 Codex 沙箱阻断导致 `Please sign in`、网络或清理报错，应向用户请求放行/提权，不要误判为本机未登录 AGY。AGY 首次认证需在交互式 `agy` 会话中完成。
+- **Codex 侧沙箱**：执行 `run_agy.py` 需要外网访问模型 API 并读取本机 AGY 认证凭据（如 `~/.gemini/antigravity-cli/`）；执行 `delete` / `--delete-after` 还需写权限以清理 `~/.gemini/antigravity-cli/` 中该会话的本地文件与索引；按需运行 `export_codex_context.py` 需读取 `${CODEX_HOME:-$HOME/.codex}/sessions/` 下当前/父线程对应的单个 rollout 文件。若因 Codex 沙箱阻断导致 `Please sign in`、网络或清理/读取报错，应向用户请求放行/提权，不要误判为本机未登录 AGY。AGY 首次认证需在交互式 `agy` 会话中完成。
 - **AGY 侧权限**：`read-only`（不传 `--mode`，走默认模式 + 只读提示词）与 `plan`（透传 `--mode plan`）均不是权限硬锁，建议叠加 `--sandbox`（如需会话级临时权限覆盖可参考 `agy --settings`，但避免覆盖用户原有 `deny` 规则）。`accept-edits` 自动接受工作区文件编辑，终端命令仍受 `deny > ask > allow` 规则约束；`auto` 自动编辑并在沙箱内运行安全命令。默认调用绝不带 `--dangerously-skip-permissions`。需要额外权限时，指出被拒的具体操作和最小 `action(target)` 规则，保留用户现有权限设置。
 
 ---
