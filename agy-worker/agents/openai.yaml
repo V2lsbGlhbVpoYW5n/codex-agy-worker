@@ -1,0 +1,7 @@
+interface:
+  display_name: "AGY Worker"
+  short_description: "通过本机 Antigravity CLI 委派 Gemini 执行分析、审查、实现与修复"
+  default_prompt: "使用 $agy-worker 通过本机 agy CLI 委派子任务。"
+
+policy:
+  allow_implicit_invocation: true

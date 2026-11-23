@@ -1,0 +1,7 @@
+interface:
+  display_name: "AGY Worker"
+  short_description: "Delegate analysis, reviews, planning, implementation, and fixes to Gemini via local Antigravity CLI"
+  default_prompt: "Use $agy-worker to delegate a subtask via the local agy CLI."
+
+policy:
+  allow_implicit_invocation: true
