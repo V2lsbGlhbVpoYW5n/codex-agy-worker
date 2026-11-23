@@ -84,6 +84,7 @@ python3 "<skill-dir>/scripts/run_agy.py" delete "<conversation_id>"
 
 ## 沙箱与权限
 
+- **外发授权与遇拒处理**：本会话**首次**将当前项目的代码、架构或内部上下文发给外部 AGY 服务前，若用户尚未明确授权发送这些内容，先向用户简短确认一次是否允许将相关代码/上下文发送给本机 `agy`（Google Antigravity）服务及大致范围，获准后再调用。若仍被 Codex `auto-reviewer` 拒绝，不要反复重试同一命令，直接向用户说明被拒原因与拟发送范围，等待明确授权或在 Codex `.rules` 中配置放行。
 - **Codex 侧沙箱**：执行 `run_agy.py` 需要外网访问模型 API 并读取本机 AGY 认证凭据（如 `~/.gemini/antigravity-cli/`）；执行 `delete` / `--delete-after` 还需写权限以清理 `~/.gemini/antigravity-cli/` 中该会话的本地文件与索引。若因 Codex 沙箱阻断导致 `Please sign in`、网络或清理报错，应向用户请求放行/提权，不要误判为本机未登录 AGY。AGY 首次认证需在交互式 `agy` 会话中完成。
 - **AGY 侧权限**：`read-only`（不传 `--mode`，走默认模式 + 只读提示词）与 `plan`（透传 `--mode plan`）均不是权限硬锁，建议叠加 `--sandbox`（如需会话级临时权限覆盖可参考 `agy --settings`，但避免覆盖用户原有 `deny` 规则）。`accept-edits` 自动接受工作区文件编辑，终端命令仍受 `deny > ask > allow` 规则约束；`auto` 自动编辑并在沙箱内运行安全命令。默认调用绝不带 `--dangerously-skip-permissions`。需要额外权限时，指出被拒的具体操作和最小 `action(target)` 规则，保留用户现有权限设置。
 
