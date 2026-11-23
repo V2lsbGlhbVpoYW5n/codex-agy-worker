@@ -106,6 +106,7 @@ python3 "<skill-dir>/scripts/run_agy.py" delete "<conversation_id>"
 - The script emits raw JSON only when `agy` exits with code 0, stdout is a single JSON object, `status == "SUCCESS"`, `error` is empty, and `response` is non-empty (or `structured_output` is non-null when `--json-schema` is used).
 - Check both the exit code and stderr. On failure, if AGY returned JSON, stderr includes `conversation_id`, `status`, and `error` for tracking or resumption.
 - Headless mode may skip tools requiring interactive approval and still exit normally; if required actions were denied or skipped, report the actual completed scope. For write tasks, inspect actual diffs (e.g., `git diff`) and run relevant tests, and check for partial edits before retrying after a failure.
+- **Reports & writing tasks**: After receiving the output, prefer checking only factual accuracy and completeness; when accurate and complete, deliver it as-is without revising the content, rewriting passages, or altering the writing style.
 - Because `agy` CLI does not yet provide an official non-interactive delete subcommand, `delete` / `--delete-after` strictly validates the UUID and performs best-effort cleanup of that session's local files and `conversation_summaries.db` rows under `~/.gemini/antigravity-cli/`.
 
 [CLI Reference](https://antigravity.google/docs/cli/reference) · [Headless Mode](https://antigravity.google/docs/cli/headless) · [Permissions](https://antigravity.google/docs/cli/permissions) · [Codex Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents)

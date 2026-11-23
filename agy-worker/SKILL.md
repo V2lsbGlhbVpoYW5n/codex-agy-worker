@@ -104,6 +104,7 @@ python3 "<skill-dir>/scripts/run_agy.py" delete "<conversation_id>"
 - 脚本只在 `agy` 退出码为 0、stdout 为单个 JSON 对象、`status` 为 `SUCCESS`、`error` 无错误，且 `response` 为非空白字符串（启用 `--json-schema` 时 `structured_output` 非空）时原样输出 JSON。
 - 同时检查脚本退出码和独立 stderr。失败时如 AGY 返回了 JSON，脚本会在 stderr 中保留 `conversation_id`、`status` 与 `error` 以便追踪或续接。
 - Headless 可能跳过需要交互授权的工具然后正常返回；若必需操作被拒或未执行，报告实际完成的范围。对写任务检查实际文件差异（如 `git diff`）与相关测试，失败重试前先检查是否已产生部分修改。
+- **报告/写作类任务**：返回后尽量只核验事实正确性与内容完整性；在准确、完善的情况下直接保留原文交付，不要自行修订内容、重写段落或改动文风。
 - 因 `agy` CLI 当前尚未提供官方非交互删会话子命令，`delete` / `--delete-after` 采用严格 UUID 校验，尽力清理 `~/.gemini/antigravity-cli/` 下对应会话的文件与 `conversation_summaries.db` 记录。
 
 [CLI Reference](https://antigravity.google/docs/cli/reference) · [Headless Mode](https://antigravity.google/docs/cli/headless) · [Permissions](https://antigravity.google/docs/cli/permissions) · [Codex Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents)
